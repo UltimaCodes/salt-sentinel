@@ -1,0 +1,13 @@
+numpy>=1.24
+pyserial>=3.5
+gpiozero>=2.0
+lgpio>=0.2
+adafruit-blinka>=8.20
+adafruit-circuitpython-vl53l0x>=3.6
+adafruit-circuitpython-amg88xx>=1.2
+adafruit-circuitpython-sht31d>=2.3
+adafruit-circuitpython-mpu6050>=1.2
+adafruit-circuitpython-ina219>=3.4
+adafruit-circuitpython-mlx90614>=1.2
+opencv-python-headless>=4.8
+reportlab>=4.0

@@ -1,0 +1,12 @@
+# Regenerable — python cli.py demo / --sim patrol reproduces these
+salt_sentinel/pi/data/
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+
+# JetBrains project-local config (machine-specific, not useful shared)
+salt_sentinel/.idea/
+
+# KiCad local project state (regenerates automatically)
+*.kicad_prl

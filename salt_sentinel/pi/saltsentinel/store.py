@@ -1,0 +1,133 @@
+"""Per-station records.
+
+Rule from the design: no reading is ever compared against one taken under
+non-comparable conditions. So every record carries the pass mode, the ambient
+conditions, the dew-point margin and the standoff it was taken at. A record
+missing those is not a measurement, it is a number.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from dataclasses import dataclass, field, asdict
+from pathlib import Path
+
+from . import config as cfg
+
+
+@dataclass
+class StationRecord:
+    station: int
+    pass_mode: str                  # "far" | "near" | "deliquescence_dawn" | ...
+    stamp: float = field(default_factory=time.time)
+    iso: str = ""
+
+    standoff_mm: float = float("nan")
+    wall_yaw_deg: float = float("nan")
+    odo_mm: float = float("nan")
+
+    air_temp_c: float = float("nan")
+    rh_pct: float = float("nan")
+    dew_margin_c: float = float("nan")
+    raining: bool = False
+    deliquescence_open: bool = False
+
+    thermal: dict = field(default_factory=dict)
+    surface: dict = field(default_factory=dict)
+    surface_temp_c: float = float("nan")
+    geometry_warnings: list = field(default_factory=list)
+
+    registration_shift_px: tuple = (0.0, 0.0)
+    registration_inliers: int = 0
+
+    risk_score: float = float("nan")
+    flagged: bool = False
+
+    notes: str = ""
+
+    def __post_init__(self):
+        if not self.iso:
+            self.iso = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(self.stamp))
+
+    @property
+    def comparable(self) -> bool:
+        """Cheap gate before this record is allowed into a trend."""
+        if self.raining:
+            return False
+        if not (self.dew_margin_c == self.dew_margin_c) or self.dew_margin_c < 1.5:
+            return False
+        if not (self.standoff_mm == self.standoff_mm):
+            return False
+        return True
+
+
+class Store:
+    def __init__(self, run_name: str | None = None, root: Path = cfg.DATA):
+        self.run = run_name or time.strftime("run_%Y%m%d_%H%M%S")
+        self.dir = root / self.run
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self.jsonl = self.dir / "stations.jsonl"
+
+    def append(self, rec: StationRecord):
+        with self.jsonl.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(asdict(rec), default=list) + "\n")
+        return rec
+
+    def images_dir(self, station: int) -> Path:
+        d = self.dir / f"station_{station:03d}"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def load(self) -> list[dict]:
+        if not self.jsonl.exists():
+            return []
+        return [json.loads(l) for l in self.jsonl.read_text(encoding="utf-8").splitlines()
+                if l.strip()]
+
+    def export_csv(self, path: Path | None = None, header_comment: str | None = None) -> Path:
+        """Flatten every station record into one row, with thermal/surface
+        fields pulled up to top level. header_comment, if given, is written
+        as a '#'-prefixed line before the header."""
+        import csv
+        from .thermal import frame_width_mm
+        path = path or (self.dir / "readings.csv")
+        fields = ["station", "pass_mode", "iso", "x_m", "y_m", "radius_mm",
+                   "standoff_mm", "wall_yaw_deg", "air_temp_c", "rh_pct",
+                   "dew_margin_c", "raining", "moisture_index_c", "peak_cooling_c",
+                   "damp_row", "bright_fraction", "roughness",
+                   "risk_score", "flagged", "comparable"]
+        with path.open("w", newline="", encoding="utf-8") as f:
+            if header_comment:
+                f.write(f"# {header_comment}\n")
+            w = csv.DictWriter(f, fieldnames=fields)
+            w.writeheader()
+            for r in self.load():
+                th = r.get("thermal") or {}
+                sf = r.get("surface") or {}
+                comparable = StationRecord(**r).comparable
+                standoff = r.get("standoff_mm") or 1000.0
+                w.writerow({
+                    "station": r["station"], "pass_mode": r["pass_mode"],
+                    "iso": r["iso"],
+                    "x_m": round((r.get("odo_mm") or 0.0) / 1000.0, 3),
+                    "y_m": round((th.get("damp_height_mm") or 0.0) / 1000.0, 3),
+                    "radius_mm": round(frame_width_mm(standoff) / 2.0, 1),
+                    "standoff_mm": r.get("standoff_mm"),
+                    "wall_yaw_deg": r.get("wall_yaw_deg"),
+                    "air_temp_c": r.get("air_temp_c"), "rh_pct": r.get("rh_pct"),
+                    "dew_margin_c": r.get("dew_margin_c"), "raining": r.get("raining"),
+                    "moisture_index_c": th.get("moisture_index"),
+                    "peak_cooling_c": th.get("peak_cooling_c"),
+                    "damp_row": th.get("damp_row"),
+                    "bright_fraction": sf.get("bright_fraction"),
+                    "roughness": sf.get("roughness"),
+                    "risk_score": r.get("risk_score"), "flagged": r.get("flagged"),
+                    "comparable": comparable,
+                })
+        return path
+
+    @staticmethod
+    def latest_run(root: Path = cfg.DATA) -> Path | None:
+        runs = sorted([p for p in root.glob("run_*") if p.is_dir()])
+        return runs[-1] if runs else None
