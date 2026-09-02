@@ -1,200 +1,22 @@
 =======================================================
-SALT SENTINEL - MASTER CHECKLIST  (rev 2)
-25 Aug  submit doc + video
-01 Sep  working robot / freeze
+SALT SENTINEL - CHECKLIST  (rev 3 - post-build)
 04 Sep  nationals
 Paste each block into Trello as a list; one line = one card
 =======================================================
 
-PHASE 1  Sat 22 - Tue 25   build and documents IN PARALLEL
-PHASE 2  Wed 26 - Tue 01   full system build, 7 days
-PHASE 3  Wed 02 - Thu 03   rehearse, pack, transport
+Build and submission are done - this file only carries what's still ahead
+of nationals. The full build-phase history (power tree, drivetrain,
+sensor bring-up, calibration, validation wall) has been dropped; ask if
+you need it back for the report's "challenges faced" section.
 
 
-### BUY TODAY ###
-20A automotive blade fuse (ATO/ATC) + inline holder
-2x rocker or toggle switch, rated >=20A DC
-ULN2803A Darlington array - LED switching, takes 3.3V logic direct
-AWG14 wire, red + black, ~2m for the main trunk re-run
-10k resistor - MOT_EN pulldown - CRITICAL, do not skip
-100k + 22k resistors + 100nF cap - pack voltage divider
-2200uF electrolytic cap - servo rail bulk
-1000uF electrolytic cap - 5V rail
-3rd VL53L0X ToF sensor - front / corner detection
-USB-C PD power bank 10000mAh 20W+ - approx PKR 2500-4000
-USB-C cable, SHORT (30cm max), thick conductors
-16.8V 2A CC/CV charger OR iMAX B6AC balance charger
-JST-XH 5-pin balance connector - if using the B6AC
-Pi 5 RTC coin cell - 2-pin connector on the board
-A2-rated microSD card
-Heatshrink assortment
-74HCT125 level shifter - spare, only if servo signal is marginal
-Pure nickel strip - magnet test it, plated steel is NOT ok
-Copper strip or braid - series links carry full pack current
-Fish paper insulator rings for cell positive ends
-
-
-### PHASE 1 - SAT 22 AUG - POWER TREE + DOC START ###
-Finish spot welding 4S3P pack - preheat 3ms, main 9ms, interval 10ms, 2 pulses, 2 dots
-Copper-assist or double-layer the SERIES links - they carry full pack current
-Measure each parallel group voltage - must be within 0.1V before first charge
-Fit 20A fuse between BMS P+ and main rail, as close to the BMS as possible
-Fit SW1 MAIN switch after the fuse, before the 3-way split
-Fit SW2 MOTOR switch in the motor branch only
-Re-run main trunk in AWG14, or accept AWG18 knowing the fuse protects it
-Set 5V buck to exactly 5.0V, CC pot at MAX
-Set 6V buck to exactly 6.0V, CC pot at MAX
-Add 2200uF cap at servo connector, 1000uF at 5V rail
-Wire star ground at pack negative - motor grounds thick and short, logic separate
-GATE - measure every rail under dummy load, NO processors connected
-DOC - write team presentation page (1 pg) - who, where, how tasks were divided
-DOC - write summary project idea page (1 pg)
-DOC - write the REJECTED IDEAS section - touch probe, EMI, ultrasonic, LIDAR tilt, depth cam
-FILM - start b-roll TODAY, every bench session, you cannot go back for it
-TRACK B - start the validation wall, it needs no robot
-
-
-### PHASE 1 - SUN 23 AUG - DRIVETRAIN + DOC ###
-Wire ESP32 GPIO 25/26 to RPWM/LPWM on BOTH left drivers
-Wire ESP32 GPIO 27/14 to RPWM/LPWM on BOTH right drivers
-Wire GPIO 23 MOT_EN to all 8 R_EN + L_EN pins
-Fit the 10k pulldown on MOT_EN to GND
-Wire BTS7960 VCC to 5V rail, GND to star ground, B+/B- to V_MOTOR
-Decide - ESP32 powered from Pi USB ONLY, leave its 5V pin unconnected
-Flash salt_sentinel_drive.ino, confirm EV READY on serial
-Test on blocks - python cli.py teleop
-Test on the floor, measure real cruise current
-GATE - drives both directions, watchdog stops motors when you kill the process
-FILM - rover driving, multiple angles, this is the core of the video
-DOC - write social impact section incl. NEGATIVE effects
-DOC - write business model canvas - cost, revenue, key resources, partners
-DOC - write next steps and prototype development roadmap
-DOC - write the SLOGAN
-
-
-### PHASE 1 - MON 24 AUG - MINIMUM VIABLE ROBOT + FILM ###
-Run bash setup_pi.sh, reboot, power bank on the Pi
-Wire I2C - SDA pin 3, SCL pin 5, two 4.7k pullups to 3V3
-POWER ALL I2C BREAKOUTS FROM 3V3 NOT 5V - 5V pullups kill the Pi GPIO
-Wire AMG8833 (AD_SELECT to 3V3) and both ToF sensors
-Wire ToF XSHUT to GPIO 5 and 6, confirm 0x30/0x31 survive a power cycle
-Run vcgencmd get_throttled after full load - must read 0x0
-GATE - wall following works and AMG8833 reads live
-SKIP FOR NOW - camera, LED ring, photometric. Not in the video, 7 days left after
-FILM - the video, 90 seconds max, see SUBMISSION_PACK.md shot list
-DOC - assemble the PDF, CHECK PAGE COUNT (20 max or it is not scored)
-DOC - AI disclosure - which systems, what purpose, what extent
-
-
-### PHASE 1 - TUE 25 AUG - SUBMIT ###
-Final read of the report by all team members
-Check PDF is 20 pages max single-sided, excluding front page, TOC, sources
-Check PDF is under 15MB
-Check video is under 90 seconds and under 100MB, mp4
-Confirm PSSEC submission method and exact time
-SUBMIT
-
-
-### PHASE 2 - WED 26 AUG - SENSOR HEAD ###
-Mount camera, AMG8833 and BOTH ToF sensors on the arm, boresighted
-Wire 4 LEDs through the ULN2803A - IN1-IN4 from GPIO 17/27/22/23
-Confirm LEDs fire ONE AT A TIME - two lit at once breaks photometric stereo
-Measure ARM_TOF_BASELINE_MM, put the real value in config.py
-Measure THERMAL_CAM_BASELINE_MM - AMG centre to lens centre
-Measure real camera FOV with a ruler at known distance, update CAM_FOV_DEG
-
-
-### PHASE 2 - THU 27 AUG - CALIBRATION ###
-Run python cli.py calib-thermal - two-point flat field
-Run python cli.py calib-camera - meter ONCE then never again
-Print or cut the white calibration card for the efflorescence reference
-Verify calibrate_white runs before a pass, else efflorescence returns NaN
-GATE - cli.py station returns a sane cooling figure and noise floor
-
-
-### PHASE 2 - FRI 28 AUG - INTEGRATION ###
-Full patrol against a real wall
-Tune TURN_GAIN and YAW_GAIN until it tracks without hunting
-Confirm station records are written with conditions attached
-GATE - follows a wall end to end and logs every station
-
-
-### PHASE 2 - SAT 29 AUG - REAL WALL DATA ###
-Get written owner permission for the Karachi test wall
-Two passes at different times of day - your first real result
-Photograph and video everything for the booth
-Log dew point margin on every pass
-
-
-### PHASE 2 - SUN 30 AUG - FIX AND TUNE ###
-Fix whatever broke at the real wall
-Repeat passes to establish the instrument noise floor
-Build the risk heatmap visual from real data
-
-
-### PHASE 2 - MON 31 AUG - BOOTH ###
-Plan and build the 2x2x2m booth layout
-Print the risk heatmap large - lead the booth with it
-Set up the deliquescence demo for live running at the booth
-Rehearse the 5-minute presentation, judges STOP you at 5, aim for 4:30
-Make sure ALL team members speak - Team Spirit is 15 points
-
-
-### PHASE 2 - TUE 01 SEP - FREEZE ###
-WORKING ROBOT DEADLINE
-No wiring changes after today
-Full dress rehearsal of the live demo
-Charge both battery packs
-
-
-### PHASE 3 - WED 02 - THU 03 SEP - PACK AND TRAVEL ###
+### PACK AND TRAVEL - WED 02 - THU 03 SEP ###
 Build padded transport case for Lahore
 Label every connector
 Pack spares - motor, driver, ESP32, sensors, 3 spare cells, fuses
 Print the report and any booth materials
 Rehearse Q&A - be ready to answer AI usage questions out loud
 Travel to Lahore
-
-
-### TRACK B - VALIDATION WALL - PARALLEL, NO ROBOT NEEDED ###
-START TODAY if you have a second person - highest score value per hour
-Source under-fired high-porosity bricks and build the timber frame
-Dose patches with NaCl at 2-3 known concentrations
-Include UNDOSED control patches
-Dosing done BLIND by someone not operating the robot
-Buy a 0.01g precision scale for gravimetric ground truth
-Build transparent enclosure + humidifier for the deliquescence demo
-Rehearse the demo - dosed patches darken, controls stay inert
-Record instrument noise floor from repeat passes over unchanged patches
-Build the confusion matrix - dosed/clean vs flagged/missed
-
-
-### DOCUMENT REQUIREMENTS - HARD LIMITS ###
-Report max 20 pages single-sided - LONGER IS NOT SCORED AT ALL
-Report PDF max 15MB
-Team presentation max 1 page
-Summary project idea max 1 page
-Robotic solution max 12 pages
-Social impact and innovation max 6 pages
-Video max 90 seconds, max 100MB, mp4, filmed BY THE TEAM
-Video must mostly show the robot RUNNING, not repeat the report
-AI disclosure mandatory - rule 6.5, new for 2026
-Replace tertiary climate sources with Pakistan Met Dept normals for Larkana
-Replace Facts and Details with the primary UNESCO State of Conservation report
-Cite Kogou and Liang 2025 with real spec - HySpex SWIR-384, 950-2500nm, 7-10m
-Cite the Hampton Court photometric stereo precedent for the flaking index
-
-
-### DECISIONS AND UNKNOWNS TO RESOLVE ###
-Do the GB37Y550 motors have encoders - 6-wire vs 2-wire connector
-What does -8.7 mean on the motor label - gear ratio or stall torque
-Actual discharge rating on the 2200mAh cells - affects fuse size
-Is the camera OV5647 or IMX708 - affects how focus is locked
-Is the ESP32 board CH340 or native USB - affects the /dev port name
-Are the VL53L0X breakouts 3.3V-only or 3-5V tolerant
-Confirm buck input voltage range covers 16.8V on both modules
-Decide whether to fit the pack voltage divider - PKR 15, constant speed as pack drains
-Where do rain sensors go now - Pi has no ADC, so ESP32 ADC, ADS1115, or manual flag
 
 
 ### DO NOT REGRESS ON - REFERENCE CARD ###

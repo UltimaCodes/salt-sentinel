@@ -70,8 +70,7 @@ class Camera:
                 "real hardware requested (no --sim) but picamera2 is not "
                 "importable, so this would otherwise have SILENTLY returned "
                 f"simulated frames instead of failing. Import error: {HW_ERR!r}. "
-                "picamera2 must come from apt (python3-picamera2), not pip - "
-                "see PI_SETUP.md.")
+                "picamera2 must come from apt (python3-picamera2), not pip.")
         self.simulate = simulate
         self.lock = lock or CameraLock.load()
         self._cam = None

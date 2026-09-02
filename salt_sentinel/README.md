@@ -1,15 +1,15 @@
 # Salt Sentinel — rover software
 
 Non-contact salt-attack monitoring rover. Two processors split along a timing
-boundary: the Pi owns vision and scoring, the ESP32 owns motor PWM, servos and
-the safety watchdog. One USB cable carries power and serial between them.
+boundary: the Pi owns vision and scoring, the ESP32 owns motor PWM and the
+safety watchdog. One USB cable carries power and serial between them.
 
 ```
-esp32/salt_sentinel_drive/   Arduino firmware — motors, servos, watchdog
+esp32/salt_sentinel_drive/   Arduino firmware — motors, watchdog, Bluetooth override
 pi/saltsentinel/
   config.py       every tunable: I2C map, GPIO map, optics, geometry
   drive.py        serial client + keepalive thread
-  sensors.py      ToF ranging (XSHUT addressing), climate, IMU, current
+  sensors.py      ToF ranging (XSHUT addressing), climate
   thermal.py      AMG8833 flat-field + in-frame differential
   camera.py       picamera2 with exposure/AWB/focus LOCKED
   photometric.py  4-light solve -> albedo + normals, cross-visit registration
@@ -20,35 +20,25 @@ pi/saltsentinel/
 pi/cli.py         selftest / teleop / calibration / patrol / geometry
 ```
 
-## Quick start
+## Running it
 
 ```bash
-bash pi/setup_pi.sh && sudo reboot
 source ~/ss-venv/bin/activate
 cd pi
-python cli.py --sim selftest     # no hardware needed
-python cli.py --sim geometry     # standoff and overlay maths
-python cli.py selftest           # real rover
+python cli.py selftest    # confirm the drive link + every sensor before a run
+python cli.py patrol      # follow the wall and sample
 ```
 
-## Bring-up order
-
-1. `python cli.py --sim selftest` — software sane
-2. Flash `esp32/salt_sentinel_drive` — expect `EV READY` on serial
-3. `python cli.py selftest` — telemetry arriving
-4. `python cli.py teleop` — manual override, rover on blocks first
-5. `python cli.py calib-thermal` — two-point flat field
-6. `python cli.py calib-camera` — meter once, freeze forever
-7. `python cli.py station` — one capture, no driving
-8. `python cli.py patrol`
+Add `--sim` to any command to run without hardware. `python cli.py -h` lists
+every subcommand.
 
 ## Current hardware assumptions
 
 | | state |
 |---|---|
 | e-stop | removed. The 500 ms firmware watchdog is the only automatic stop |
-| pack voltage divider | NOT fitted. `HAVE_VPACK_SENSE 0`, duty capped at 71% |
-| ToF fitted | `wall_a`, `wall_b` on the arm. No `front` → no corner detection |
+| motors | 2-wire (no encoders). `USE_ENCODERS 0`. No duty cap — motor rail is a dedicated regulated 7.2V buck, not raw pack voltage |
+| ToF fitted | `wall_a`, `wall_b` on the chassis (`wall_b`=front, `wall_a`=back — see `config.py`). No `front` → no corner detection |
 | rain sensors | not wired. `Patrol.raining` is operator-set |
 | LED switching | ULN2803A, 3.3 V logic direct, no MOSFETs |
 

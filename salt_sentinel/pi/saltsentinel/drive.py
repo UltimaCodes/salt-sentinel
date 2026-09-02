@@ -4,6 +4,12 @@ The firmware stops the motors if it doesn't hear from us within 500ms, so
 this client runs a keepalive thread - if this process crashes or blocks,
 the rover coasts to a stop on its own. That watchdog is the only automatic
 stop the rover has now that the hardware e-stop is gone.
+
+The firmware also accepts Bluetooth commands from a phone, which silently
+take priority over ours for 5s after the last one - drive() calls made
+during that window are accepted (no error) but not actually applied at the
+motor. Check telemetry.bt_override if you need to know whether a command
+just sent is actually in effect.
 """
 
 from __future__ import annotations
@@ -14,10 +20,6 @@ from dataclasses import dataclass, field
 
 from . import config as cfg
 
-# Mirrors SAFE_CAP in the firmware: assume a full 4S pack (16.8 V) and cap duty
-# so 12 V motors never see more than 12 V. Used when no divider is fitted.
-SAFE_DUTY_CAP = 12.0 / 16.8
-
 try:
     import serial  # pyserial
 except ImportError:  # pragma: no cover - allows laptop development
@@ -26,25 +28,15 @@ except ImportError:  # pragma: no cover - allows laptop development
 
 @dataclass
 class Telemetry:
-    pack_v: float = -1.0        # -1 = no divider fitted on the ESP32
     enabled: bool = False
-    vpack_fault: bool = False
-    duty_cap: float = 0.0       # what the firmware is actually limiting to
     left: int = 0
     right: int = 0
-    pan_us: int = 1500
-    tilt_us: int = 1500
-    enc_l: int = 0
-    enc_r: int = 0
+    bt_override: bool = False   # a human is driving over Bluetooth right now
     stamp: float = field(default_factory=time.time)
 
     @property
     def stale(self) -> bool:
         return (time.time() - self.stamp) > 1.0
-
-    @property
-    def has_vpack(self) -> bool:
-        return self.pack_v >= 0.0
 
 
 class Drive:
@@ -113,9 +105,6 @@ class Drive:
         d = max(-cfg.MAX_DIFF, min(cfg.MAX_DIFF, int(differential)))
         self.drive(forward + d, forward - d)
 
-    def servos(self, pan_us: int, tilt_us: int):
-        self._send(f"S {int(pan_us)} {int(tilt_us)}")
-
     def ping(self):
         self._send("P")
 
@@ -134,10 +123,7 @@ class Drive:
         while self._run:
             if self.simulate:
                 time.sleep(0.1)
-                # mirror what the firmware actually reports so the simulation
-                # is representative: no divider fitted -> fixed safe duty cap
                 self.telemetry.stamp = time.time()
-                self.telemetry.duty_cap = SAFE_DUTY_CAP
                 self.telemetry.left = self._left
                 self.telemetry.right = self._right
                 continue
@@ -160,26 +146,14 @@ class Drive:
                 continue
             k, v = tok.split("=", 1)
             try:
-                if k == "v":
-                    t.pack_v = float(v)
-                elif k == "en":
+                if k == "en":
                     t.enabled = v == "1"
-                elif k == "vf":
-                    t.vpack_fault = v == "1"
-                elif k == "cap":
-                    t.duty_cap = float(v)
                 elif k == "L":
                     t.left = int(v)
                 elif k == "R":
                     t.right = int(v)
-                elif k == "pan":
-                    t.pan_us = int(v)
-                elif k == "tilt":
-                    t.tilt_us = int(v)
-                elif k == "encL":
-                    t.enc_l = int(v)
-                elif k == "encR":
-                    t.enc_r = int(v)
+                elif k == "bt":
+                    t.bt_override = v == "1"
             except ValueError:
                 continue
         self.telemetry = t

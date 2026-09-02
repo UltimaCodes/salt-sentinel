@@ -64,13 +64,7 @@ def cmd_selftest(a):
         with Drive(simulate=a.sim) as d:
             time.sleep(1.2)
             t = d.telemetry
-            if t.has_vpack:
-                print(f"  pack {t.pack_v:.2f} V   cap {t.duty_cap:.0%}   fault={t.vpack_fault}")
-            else:
-                print(f"  pack voltage NOT SENSED (no divider fitted)")
-                print(f"  duty cap fixed at {t.duty_cap:.0%} - motors held at or below 12 V")
-            print(f"  enabled={t.enabled}  servos pan={t.pan_us} tilt={t.tilt_us}")
-            print(f"  encoders L={t.enc_l} R={t.enc_r}")
+            print(f"  enabled={t.enabled}")
             if not a.sim and t.stale:
                 print("  FAIL no telemetry - check the port and that the ESP32 is flashed")
                 ok = False
@@ -93,8 +87,6 @@ def cmd_selftest(a):
         print(f"  climate    {c.temp_c:.1f} C  {c.rh_pct:.0f} %RH  dew {c.dew_c:.1f} C "
               f"margin {c.dew_margin_c:+.1f} C")
         print(f"  deliquescence channel {'OPEN' if c.deliquescence_open else 'closed'}")
-        print(f"  surface    {hub.surface_temp_c():.1f} C (MLX90614)")
-        print(f"  rail       {hub.rail_current_ma():.0f} mA")
     except Exception as e:
         print(f"  FAIL {e}")
         ok = False

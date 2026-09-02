@@ -9,6 +9,8 @@ missing those is not a measurement, it is a number.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -64,10 +66,14 @@ class StationRecord:
 
 class Store:
     def __init__(self, run_name: str | None = None, root: Path = cfg.DATA):
-        self.run = run_name or time.strftime("run_%Y%m%d_%H%M%S")
+        # Named without a verdict yet - finalize() appends OUTPUTCLEAN/
+        # OUTPUTSALT once the wall is actually done and we know which.
+        self.run = run_name or time.strftime("%Y%m%d-%H%M%S")
+        self.root = root
         self.dir = root / self.run
         self.dir.mkdir(parents=True, exist_ok=True)
         self.jsonl = self.dir / "stations.jsonl"
+        self.finalized = False
 
     def append(self, rec: StationRecord):
         with self.jsonl.open("a", encoding="utf-8") as f:
@@ -128,6 +134,50 @@ class Store:
         return path
 
     @staticmethod
+    def _usb_mounts() -> list[Path]:
+        """Writable removable-media mount points, Raspberry Pi OS auto-mount
+        convention (/media/<user>/<label>). Returns [] if nothing's plugged
+        in - the caller treats that as "no USB backup this run", not a
+        failure, since the Pi's own copy is already safely written."""
+        media = Path("/media")
+        if not media.is_dir():
+            return []
+        out = []
+        for user_dir in media.iterdir():
+            if not user_dir.is_dir():
+                continue
+            for mount in user_dir.iterdir():
+                if mount.is_dir() and os.access(mount, os.W_OK):
+                    out.append(mount)
+        return out
+
+    def finalize(self, salt_detected: bool) -> Path:
+        """Call once, after the wall is actually done. Renames the run
+        directory to carry the OUTPUTCLEAN/OUTPUTSALT verdict, then mirrors
+        the whole thing onto every writable USB drive found - a judge or a
+        conservator should be able to pull the data without touching the Pi
+        itself. Safe to call more than once; only the first call does anything.
+        """
+        if self.finalized:
+            return self.dir
+        suffix = "OUTPUTSALT" if salt_detected else "OUTPUTCLEAN"
+        final_dir = self.root / f"{self.run}{suffix}"
+        if final_dir != self.dir:
+            self.dir.rename(final_dir)
+            self.dir = final_dir
+            self.jsonl = self.dir / "stations.jsonl"
+        self.finalized = True
+
+        for mount in self._usb_mounts():
+            try:
+                dest = mount / self.dir.name
+                shutil.copytree(self.dir, dest, dirs_exist_ok=True)
+            except Exception as e:
+                print(f"USB backup to {mount} failed (data is still on the Pi): {e!r}")
+        return self.dir
+
+    @staticmethod
     def latest_run(root: Path = cfg.DATA) -> Path | None:
-        runs = sorted([p for p in root.glob("run_*") if p.is_dir()])
+        runs = sorted([p for p in root.iterdir()
+                      if p.is_dir() and p.name[:8].isdigit()])
         return runs[-1] if runs else None

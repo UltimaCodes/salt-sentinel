@@ -1,11 +1,18 @@
 """Patrol state machine: follow one wall until it ends, sampling as it goes.
 
 Navigation is ToF only: wall_a + wall_b (mean = range, difference = yaw),
-front for corner detection. Wall ends when the wall sensors go out of range.
+front for corner detection. Wall ends when the wall sensors go out of range
+or a corner is reached, run() hits max_stations, or the operator hits
+Ctrl+C in the terminal running it - that's the manual stop, CLI only,
+same as everything else in this project. Ctrl+C still stops the motors and
+saves whatever was captured so far, same as a normal end-of-wall.
 
 Two passes per station, opposite standoffs: FAR (~1m) for the thermal
 survey (frame needs both damp and dry brick in view), NEAR (~25cm) for
 camera detail, only where the far pass actually flagged something.
+
+On completion, the run is saved under a OUTPUTCLEAN/OUTPUTSALT-suffixed
+folder (Store.finalize()) and mirrored to any USB drive that's plugged in.
 """
 
 from __future__ import annotations
@@ -46,6 +53,7 @@ class Patrol:
         self._speed_mms = 0.0      # feeds the single-sensor yaw fallback
         self._enc0 = None
         self.log: list[str] = []
+        self._any_flagged = False        # -> OUTPUTSALT vs OUTPUTCLEAN at finalize()
 
     # ------------------------------------------------------------- utilities
     def _say(self, msg: str):
@@ -76,20 +84,25 @@ class Patrol:
     # ------------------------------------------------------------- stations
     def _capture_far(self, climate) -> StationRecord:
         from . import geometry
-        pose = self.hub.wall_pose(speed_mms=0.0)   # stationary
-        res = self.thermal.analyse(pose.distance_mm, climate.temp_c)
+        pose = self.hub.wall_pose(speed_mms=0.0)   # stationary, chassis range
+        # wall_a/wall_b are on the chassis; the thermal array is out on the
+        # static arm, so the optics see a different range than the ToF pair
+        # measured - correct it here, once, before anything optical uses it.
+        # _steer() elsewhere uses pose.distance_mm directly (uncorrected) on
+        # purpose, since steering cares about chassis clearance, not arm range.
+        arm_mm = pose.distance_mm + cfg.ARM_TO_CHASSIS_OFFSET_MM
+        res = self.thermal.analyse(arm_mm, climate.temp_c)
         rec = StationRecord(
             station=self.station, pass_mode="far",
-            standoff_mm=pose.distance_mm, wall_yaw_deg=pose.yaw_deg,
+            standoff_mm=arm_mm, wall_yaw_deg=pose.yaw_deg,
             odo_mm=self.odo_mm,
             air_temp_c=climate.temp_c, rh_pct=climate.rh_pct,
             dew_margin_c=climate.dew_margin_c, raining=climate.raining,
             deliquescence_open=climate.deliquescence_open,
             thermal=res.as_dict(),
-            surface_temp_c=self.hub.surface_temp_c(),
-            geometry_warnings=geometry.check(pose.distance_mm),
+            geometry_warnings=geometry.check(arm_mm),
         )
-        if not self.thermal.frame_spans_reference(pose.distance_mm):
+        if not self.thermal.frame_spans_reference(arm_mm):
             rec.notes = ("standoff too close: frame may contain no dry reference, "
                          "differential can read zero on a large damp patch")
         self.store.append(rec)
@@ -133,15 +146,16 @@ class Patrol:
             }
 
         pose = self.hub.wall_pose(speed_mms=0.0)
+        arm_mm = pose.distance_mm + cfg.ARM_TO_CHASSIS_OFFSET_MM  # camera is on the arm too
         rec = StationRecord(
             station=self.station, pass_mode="near",
-            standoff_mm=pose.distance_mm, wall_yaw_deg=pose.yaw_deg,
+            standoff_mm=arm_mm, wall_yaw_deg=pose.yaw_deg,
             odo_mm=self.odo_mm,
             air_temp_c=climate.temp_c, rh_pct=climate.rh_pct,
             dew_margin_c=climate.dew_margin_c, raining=climate.raining,
             deliquescence_open=climate.deliquescence_open,
             surface=surf,
-            geometry_warnings=geometry.check(pose.distance_mm),
+            geometry_warnings=geometry.check(arm_mm),
         )
         self.store.append(rec)
         bright = surf["bright_fraction"]
@@ -196,6 +210,7 @@ class Patrol:
                     far = self._capture_far(climate)
 
                     flagged = far.thermal.get("peak_cooling_c", 0.0) >= self.flag_threshold_c
+                    self._any_flagged = self._any_flagged or flagged
                     if flagged:
                         self.state = State.STATION_NEAR
                         self._say("flagged - running near pass")
@@ -211,12 +226,17 @@ class Patrol:
 
                 # normal wall following
                 self.drive.tank(cfg.CRUISE, self._steer(pose))
-                self._speed_mms = cfg.CRUISE * 0.9      # rough, refined by encoders
+                self._speed_mms = cfg.CRUISE * 0.9      # rough, no encoders to refine it
                 self.odo_mm += self._speed_mms * tick_s
                 time.sleep(tick_s)
+        except KeyboardInterrupt:
+            self._say("Ctrl+C - stopping and saving what was captured so far")
         finally:
             self.drive.stop()
             self.drive.enable(False)
 
         self._say(f"finished in state {self.state.name} after {self.station} stations")
+        final_dir = self.store.finalize(self._any_flagged)
+        self._say(f"saved to {final_dir} ({'OUTPUTSALT' if self._any_flagged else 'OUTPUTCLEAN'}, "
+                  f"+ USB copy if a drive was plugged in)")
         return self.state

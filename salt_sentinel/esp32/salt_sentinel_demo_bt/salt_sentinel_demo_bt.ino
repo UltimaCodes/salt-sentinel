@@ -4,7 +4,9 @@
  * NOT the real drive firmware (that's salt_sentinel_drive.ino, USB serial
  * from the Pi). Flash this one only for filming, then reflash the real one.
  *
- * Pair to "SaltSentinelDemo" with a gamepad-style Bluetooth RC app and send:
+ * Pair to "SaltSentinelDemo" (PIN: BT_PIN below, required to pair - the
+ * radio's on and visible from boot, but nobody else can connect without
+ * it) with a gamepad-style Bluetooth RC app and send:
  *   F  forward   B  backward   X  stop (also anything unrecognised)
  * No L/R - all 4 drivers share ONE RPWM and ONE LPWM signal now, so there's
  * no way to turn one side independently. F/B/X is all this rig does.
@@ -37,6 +39,10 @@
 #endif
 
 BluetoothSerial SerialBT;
+
+// Required to pair - forces legacy PIN pairing instead of ESP32's default
+// "Just Works" mode, which lets anyone in range pair with no prompt at all.
+static const char *BT_PIN = "727";
 
 // ----------------------------------------------------------------- pins
 static const int PIN_RPWM = 25;   // buses to all 4 drivers' RPWM
@@ -128,6 +134,7 @@ static void handle(char c) {
 // ----------------------------------------------------------------- setup
 void setup() {
   Serial.begin(115200);
+  SerialBT.setPin(BT_PIN);   // must be called before begin()
   SerialBT.begin("SaltSentinelDemo");
   Serial.println("Bluetooth demo controller ready - pair to SaltSentinelDemo");
 

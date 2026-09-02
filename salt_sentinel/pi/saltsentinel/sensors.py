@@ -1,10 +1,11 @@
-"""I2C sensors: ToF ranging, climate, IMU, current monitor.
+"""I2C sensors: ToF ranging, climate.
 
 Every VL53L0X ships at 0x29, so they're woken one at a time via XSHUT and
 reassigned - the new addresses are RAM-only, so this has to run every boot.
-The two wall-facing units belong on the sensor arm (not the chassis),
-boresighted with the camera/thermal array, since their range sets the
-physical scale for every measurement and overlay.
+The two wall-facing units are mounted on the chassis (the sensor arm is now
+static, holding only the thermal array/camera/SHT31 - see config.py's
+ARM_TO_CHASSIS_OFFSET_MM), so their range needs that fixed offset applied
+before it's used to scale the thermal/camera overlay in geometry.py.
 """
 
 from __future__ import annotations
@@ -20,20 +21,12 @@ try:
     import busio
     import adafruit_vl53l0x
     import adafruit_sht31d
-    import adafruit_mpu6050
-    import adafruit_ina219
     from gpiozero import DigitalOutputDevice
     HW = True
     HW_ERR = None
 except Exception as e:  # pragma: no cover - laptop development
     HW = False
     HW_ERR = e
-
-try:
-    import adafruit_mlx90614
-    HAS_MLX = True
-except Exception:
-    HAS_MLX = False
 
 
 def dew_point_c(temp_c: float, rh_pct: float) -> float:
@@ -63,29 +56,19 @@ class SensorHub:
                 "libraries are not importable, so this would otherwise have "
                 "SILENTLY returned simulated numbers instead of failing. "
                 f"Import error: {HW_ERR!r}. Run pip install -r requirements.txt "
-                "inside the venv (see PI_SETUP.md), or pass --sim if you meant "
-                "to run without hardware.")
+                "inside the venv, or pass --sim if you meant to run without "
+                "hardware.")
         self.simulate = simulate
         self.tof = {}
         self._xshut = {}
         self._prev = None
         self.sht = None
-        self.imu = None
-        self.ina = None
-        self.mlx = None
         if self.simulate:
             return
 
         self.i2c = busio.I2C(board.SCL, board.SDA, frequency=100_000)
         self._init_tof()
         self.sht = adafruit_sht31d.SHT31D(self.i2c, address=cfg.I2C_SHT31)
-        self.imu = adafruit_mpu6050.MPU6050(self.i2c, address=cfg.I2C_MPU6050)
-        self.ina = adafruit_ina219.INA219(self.i2c, addr=cfg.I2C_INA219)
-        if HAS_MLX:
-            try:
-                self.mlx = adafruit_mlx90614.MLX90614(self.i2c, address=cfg.I2C_MLX)
-            except Exception:
-                self.mlx = None
 
     # ------------------------------------------------------------------ ToF
     def _init_tof(self):
@@ -167,35 +150,6 @@ class SensorHub:
         dew = dew_point_c(t, rh)
         return cfg.Climate(temp_c=t, rh_pct=rh, dew_c=dew,
                            dew_margin_c=t - dew, raining=raining)
-
-    def surface_temp_c(self) -> float:
-        """Absolute surface temperature (MLX90614), anchoring the AMG8833
-        which is accurate pixel-to-pixel but not in absolute terms."""
-        if self.simulate:
-            return 26.4
-        if not self.mlx:
-            return float("nan")
-        try:
-            return float(self.mlx.object_temperature)
-        except Exception:
-            return float("nan")
-
-    # ------------------------------------------------------------------ misc
-    def heading_rate(self) -> float:
-        if self.simulate:
-            return 0.0
-        try:
-            return float(self.imu.gyro[2])
-        except Exception:
-            return 0.0
-
-    def rail_current_ma(self) -> float:
-        if self.simulate:
-            return 480.0
-        try:
-            return float(self.ina.current)
-        except Exception:
-            return float("nan")
 
     def close(self):
         for d in self._xshut.values():

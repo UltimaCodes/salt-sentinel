@@ -7,8 +7,12 @@ offset between them in PIXELS scales with distance:
 
 At 250mm standoff / 40mm baseline that's 322px (~16% of frame) - guess the
 distance wrong by 50mm and the overlay is off by 80px, 25% scale error.
-Hence both wall ToF sensors live on the arm, boresighted with the optics,
-not on the chassis where they'd measure the wrong distance entirely.
+
+The ToF pair that measures this distance is chassis-mounted, not on the
+static arm where the thermal array and camera actually sit (see sensors.py /
+config.ARM_TO_CHASSIS_OFFSET_MM). Every distance this module receives is
+expected to already be arm-to-wall range, offset already applied by the
+caller - not raw chassis range.
 """
 
 from __future__ import annotations

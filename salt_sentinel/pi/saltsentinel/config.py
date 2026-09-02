@@ -11,19 +11,39 @@ CALIB = DATA / "calib"
 # ------------------------------------------------------------------ I2C map
 # Addresses are set deliberately, never inherited from module defaults.
 I2C_SHT31   = 0x44
-I2C_MLX     = 0x5A
-I2C_INA219  = 0x40
-I2C_MPU6050 = 0x68     # AD0 -> GND
 I2C_AMG8833 = 0x69     # AD_SELECT -> 3V3
 
 # All VL53L0X ship as 0x29. Reassigned at boot via XSHUT, and the assignment
 # is VOLATILE - lost on every power cycle, so the sequence runs every boot.
 #
-# Recommended placement: wall_a and wall_b side by side ON THE SENSOR ARM,
-# boresighted with the camera and thermal array. Their mean is the range used
-# for every scale and overlay calculation; their difference is the arm's yaw to
-# the wall. Because the arm is rigid to the chassis while following, the same
-# pair also steers. 'front' sits on the chassis for corner detection.
+# Placement: wall_a and wall_b are mounted on the CHASSIS, facing the wall,
+# side by side - not on the sensor arm, which is now a static bracket
+# holding only the thermal array, camera and SHT31. Their mean is still the
+# range used for steering (distance + yaw), but since the arm is no longer
+# co-located with them, the thermal/camera overlay math (geometry.py) needs
+# ARM_TO_CHASSIS_OFFSET_MM added before treating chassis range as arm range.
+# 'front' sits on the chassis for corner detection.
+#
+# wall_b = FRONT (leading, toward the direction of travel), wall_a = BACK.
+# This isn't arbitrary - it's forced by the sign convention already baked
+# into patrol.py/sensors.py, and swapping the two wires the steering loop
+# into a positive-feedback crash instead of a wall-follower:
+#   - drive.tank(forward, differential): differential > 0 steers RIGHT.
+#   - patrol._steer(): distance > STANDOFF_FAR_MM (too far from the wall)
+#     gives differential > 0 -> steers right to close the gap. For that
+#     correction to actually work, the wall must be on the robot's RIGHT.
+#   - sensors.wall_pose(): yaw = atan2(wall_b - wall_a, baseline), and
+#     _steer() adds +YAW_GAIN*yaw to the same right-positive differential.
+#     If the FRONT sensor is drifting closer to the (right-side) wall than
+#     the back one, the robot needs to steer LEFT (away) to correct - i.e.
+#     yaw must go negative in that situation. yaw = atan2(wall_b - wall_a,
+#     ...) only goes negative when front-closer iff wall_b IS the front
+#     sensor (front closer -> wall_b < wall_a -> wall_b - wall_a < 0).
+#     Wire it the other way (wall_a = front) and the same drift makes yaw
+#     positive, which *adds* to the turn instead of opposing it - the loop
+#     steers harder into the wall the closer it gets.
+# Physically: mount wall_b nearer the front of the chassis, wall_a nearer
+# the back, both facing the same side as the arm sensors (the wall side).
 TOF_FITTED = ("wall_a", "wall_b")          # extend to include "front" when fitted
 TOF_XSHUT  = {"wall_a": 5, "wall_b": 6, "front": 13}      # BCM pins
 TOF_ADDR   = {"wall_a": 0x30, "wall_b": 0x31, "front": 0x32}
@@ -34,12 +54,18 @@ TOF_ORDER  = TOF_FITTED
 LED_RING_PIN = 17     # BCM
 
 # ------------------------------------------------------------------ geometry
-# Spacing of the two arm-mounted ToF sensors along the direction of travel.
-# Measure this once the arm is built - the yaw calculation scales directly
-# off it.
+# Spacing of the two chassis-mounted ToF sensors along the direction of
+# travel. The yaw calculation scales directly off this - measure it once
+# the sensors are actually mounted.
 ARM_TOF_BASELINE_MM = 120.0
 TOF_BASELINE_MM = ARM_TOF_BASELINE_MM      # backwards-compatible alias
-ARM_TO_CHASSIS_OFFSET_MM = 0.0             # measure once the arm is built
+
+# The ToF pair sits on the chassis; the thermal array/camera sit on the
+# static arm out front. Chassis range + this offset = arm-to-wall range,
+# which is what geometry.py's overlay math actually needs. 0.0 until the
+# arm is built and this is measured - leaving it at 0 silently treats
+# chassis range as arm range, which is wrong by exactly the arm's length.
+ARM_TO_CHASSIS_OFFSET_MM = 0.0
 
 # Two standoffs, because the channels want opposite distances.
 STANDOFF_FAR_MM  = 1000.0   # thermal survey: frame must contain damp AND dry brick
