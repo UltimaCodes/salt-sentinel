@@ -25,7 +25,7 @@ from saltsentinel import config as cfg
 from saltsentinel.drive import Drive
 from saltsentinel.sensors import SensorHub
 from saltsentinel.thermal import ThermalCamera, frame_width_mm, mm_per_pixel
-from saltsentinel.store import Store
+from saltsentinel.store import Store, StationRecord
 
 
 def cmd_geometry(a):
@@ -204,9 +204,27 @@ def cmd_station(a):
     print(f"cooling  {r.moisture_index:+.2f} C   peak {r.peak_cooling_c:+.2f} C")
     print(f"damp row {r.damp_row}  height {r.damp_height_mm:.0f} mm")
     print(f"noise floor {r.noise_floor_c:.3f} C  <- nothing smaller is claimable")
-    for w in geo.check(d):
+    warnings = geo.check(d)
+    for w in warnings:
         print(f"  ! {w}")
-    print(f"record dir {store.dir}")
+
+    # This used to just print numbers and report store.dir as if the
+    # reading had been saved there - it never actually was. Build and
+    # append the record for real, then finalize (rename + USB mirror)
+    # the same as patrol/demo do, since a standalone station capture has
+    # no other "run complete" signal to trigger that on.
+    rec = StationRecord(
+        station=1, pass_mode="far",
+        standoff_mm=d, wall_yaw_deg=pose.yaw_deg,
+        air_temp_c=c.temp_c, rh_pct=c.rh_pct, dew_margin_c=c.dew_margin_c,
+        deliquescence_open=c.deliquescence_open,
+        thermal=r.as_dict(), geometry_warnings=warnings,
+    )
+    store.append(rec)
+    flagged = r.peak_cooling_c >= 0.6   # matches Patrol's default flag_threshold_c
+    final_dir = store.finalize(flagged)
+    print(f"saved to {final_dir} ({'OUTPUTSALT' if flagged else 'OUTPUTCLEAN'}, "
+          f"+ USB copy if a drive was plugged in)")
     return 0
 
 

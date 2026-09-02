@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -135,20 +136,65 @@ class Store:
 
     @staticmethod
     def _usb_mounts() -> list[Path]:
-        """Writable removable-media mount points, Raspberry Pi OS auto-mount
-        convention (/media/<user>/<label>). Returns [] if nothing's plugged
-        in - the caller treats that as "no USB backup this run", not a
-        failure, since the Pi's own copy is already safely written."""
+        """Writable removable-media mount points.
+
+        Scanning /media/<user>/<label> alone assumes some desktop-session
+        automount service already reacted to the drive being plugged in.
+        That's true if someone's actually logged into the Pi's graphical
+        session (or connected over VNC), but false over a plain SSH/remote
+        shell session with nobody at the desktop - nothing mounts the drive
+        at all in that case, and this silently returned [] every time.
+        So: also enumerate removable partitions directly via lsblk and
+        self-mount any that aren't mounted yet, via udisksctl - which works
+        with no desktop session and (per Raspberry Pi OS's default polkit
+        rules) without root either. Falls back to [] on any failure, same
+        as before - a missing/failed mount is "no USB backup this run",
+        never a crash, since the Pi's own copy is already safely written.
+        """
+        out: list[Path] = []
+        seen: set[str] = set()
+
         media = Path("/media")
-        if not media.is_dir():
-            return []
-        out = []
-        for user_dir in media.iterdir():
-            if not user_dir.is_dir():
-                continue
-            for mount in user_dir.iterdir():
-                if mount.is_dir() and os.access(mount, os.W_OK):
-                    out.append(mount)
+        if media.is_dir():
+            for user_dir in media.iterdir():
+                if not user_dir.is_dir():
+                    continue
+                for mount in user_dir.iterdir():
+                    if mount.is_dir() and os.access(mount, os.W_OK):
+                        out.append(mount)
+                        seen.add(str(mount))
+
+        try:
+            raw = subprocess.run(
+                ["lsblk", "-J", "-o", "NAME,RM,TYPE,MOUNTPOINT"],
+                capture_output=True, text=True, timeout=5, check=True,
+            ).stdout
+            devices = json.loads(raw).get("blockdevices", [])
+        except Exception:
+            devices = []
+
+        def walk(nodes):
+            for node in nodes:
+                if node.get("type") == "part" and node.get("rm"):
+                    mp = node.get("mountpoint")
+                    if not mp:
+                        try:
+                            r = subprocess.run(
+                                ["udisksctl", "mount", "-b", f"/dev/{node['name']}",
+                                 "--no-user-interaction"],
+                                capture_output=True, text=True, timeout=15,
+                            )
+                            # stdout on success: "Mounted /dev/sda1 at /media/pi/LABEL."
+                            if " at " in r.stdout:
+                                mp = r.stdout.strip().rsplit(" at ", 1)[1].rstrip(".")
+                        except Exception:
+                            mp = None
+                    if mp and mp not in seen and os.access(mp, os.W_OK):
+                        out.append(Path(mp))
+                        seen.add(mp)
+                walk(node.get("children", []))
+
+        walk(devices)
         return out
 
     def finalize(self, salt_detected: bool) -> Path:
