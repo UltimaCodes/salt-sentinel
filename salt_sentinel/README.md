@@ -40,7 +40,7 @@ every subcommand.
 | motors | 2-wire (no encoders). `USE_ENCODERS 0`. No duty cap — motor rail is a dedicated regulated 7.2V buck, not raw pack voltage |
 | ToF fitted | `wall_a`, `wall_b` on the chassis (`wall_b`=front, `wall_a`=back — see `config.py`). No `front` → no corner detection |
 | rain sensors | not wired. `Patrol.raining` is operator-set |
-| LED switching | ULN2803A, 3.3 V logic direct, no MOSFETs |
+| LED fill ring | not fitted. `config.LED_FITTED = False` gates it off everywhere — patrol's near pass (efflorescence) is a no-op without it |
 
 Each is a one-line change in `config.py` or the `.ino` when the hardware lands.
 

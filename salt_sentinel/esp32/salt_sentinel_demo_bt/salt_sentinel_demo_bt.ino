@@ -48,15 +48,11 @@ static const char *BT_PIN = "727";
 static const int PIN_RPWM = 25;   // buses to all 4 drivers' RPWM
 static const int PIN_LPWM = 26;   // buses to all 4 drivers' LPWM
 // No PIN_MOT_EN - R_EN/L_EN are hardwired to VCC, not to the ESP32.
-static const int PIN_SERVO_PAN  = 19;
-static const int PIN_SERVO_TILT = 21;
 
 // ----------------------------------------------------------------- config
 static const int      PWM_FREQ   = 20000;
 static const int      PWM_BITS   = 10;
 static const int      PWM_MAX    = (1 << PWM_BITS) - 1;
-static const int      SERVO_FREQ = 50;
-static const int      SERVO_BITS = 16;
 
 static const float    RAMP_PER_TICK = 25.0f;
 static const uint32_t TICK_MS       = 10;
@@ -64,8 +60,6 @@ static const uint32_t TICK_MS       = 10;
 // Cruise speed for filming, not a safety limit - raise toward PWM_MAX for more speed.
 static const float DEMO_SPEED_FRAC = 0.75f;
 static const int   DEMO_SPEED = (int)(DEMO_SPEED_FRAC * PWM_MAX);
-
-static const uint16_t SERVO_CENTER_US = 1500;   // parked here once at boot, never moved
 
 // ----------------------------------------------------------------- state
 static float    cur = 0, tgt = 0;
@@ -88,8 +82,8 @@ static void pwmWrite(int pin, uint32_t duty) {
 #if ESP_ARDUINO_VERSION_MAJOR >= 3
   ledcWrite(pin, duty);
 #else
-  static const int pins[] = {PIN_RPWM, PIN_LPWM, PIN_SERVO_PAN, PIN_SERVO_TILT};
-  for (int i = 0; i < 4; i++) if (pins[i] == pin) { ledcWrite(i, duty); return; }
+  static const int pins[] = {PIN_RPWM, PIN_LPWM};
+  for (int i = 0; i < 2; i++) if (pins[i] == pin) { ledcWrite(i, duty); return; }
 #endif
 }
 
@@ -102,11 +96,6 @@ static void allStop() {
   tgt = cur = 0;
   pwmWrite(PIN_RPWM, 0); pwmWrite(PIN_LPWM, 0);
   enabled = false;
-}
-
-static void writeServo(int pin, uint16_t us) {
-  uint32_t duty = (uint32_t)((us / 20000.0f) * ((1UL << SERVO_BITS) - 1));
-  pwmWrite(pin, duty);
 }
 
 // ----------------------------------------------------------------- commands
@@ -140,11 +129,7 @@ void setup() {
 
   pwmInit(PIN_RPWM, PWM_FREQ, PWM_BITS);
   pwmInit(PIN_LPWM, PWM_FREQ, PWM_BITS);
-  pwmInit(PIN_SERVO_PAN,  SERVO_FREQ, SERVO_BITS);
-  pwmInit(PIN_SERVO_TILT, SERVO_FREQ, SERVO_BITS);
   allStop();
-  writeServo(PIN_SERVO_PAN, SERVO_CENTER_US);
-  writeServo(PIN_SERVO_TILT, SERVO_CENTER_US);
 }
 
 // ----------------------------------------------------------------- loop

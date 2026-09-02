@@ -50,7 +50,12 @@ TOF_ADDR   = {"wall_a": 0x30, "wall_b": 0x31, "front": 0x32}
 TOF_ORDER  = TOF_FITTED
 
 # ------------------------------------------------------------------ GPIO
-# Wall fill light: one LED ring, switched through a single transistor.
+# Wall fill light: NOT FITTED YET. This is the planned wiring (one LED ring,
+# switched through a single ULN2803A transistor channel on this pin) - there
+# is no LED hardware on the rover right now. LED_FITTED gates every caller
+# (cli.py's patrol command, and by extension patrol.py's near pass) so
+# nothing tries to drive a pin nothing is actually connected to.
+LED_FITTED = False
 LED_RING_PIN = 17     # BCM
 
 # ------------------------------------------------------------------ geometry
@@ -72,9 +77,9 @@ STANDOFF_FAR_MM  = 1000.0   # thermal survey: frame must contain damp AND dry br
 STANDOFF_NEAR_MM = 250.0    # camera detail: micro-texture + usable LED geometry
 STANDOFF_TOL_MM  = 15.0
 
-# Only meaningful if a future rev brings back multi-light photometric
-# stereo (see photometric.py) - the current single-ring fill light doesn't
-# use these.
+# Only meaningful if a future rev brings the LED ring and photometric
+# stereo (see photometric.py) together - neither is fitted right now, this
+# is dimensioning math for when they are.
 LED_RING_RADIUS_MM = 120.0
 LED_ANGLES_DEG = (0.0, 90.0, 180.0, 270.0)
 

@@ -1,6 +1,7 @@
-"""Wall fill light - a single LED ring, switched through one transistor
-off the Pi's GPIO. Just gives the camera consistent lighting; not a
-photometric rig, so it only supports on/off, not directional sequencing.
+"""Wall fill light - NOT FITTED YET (see config.LED_FITTED). When it is, a
+single LED ring switched through one transistor off the Pi's GPIO gives the
+camera consistent lighting; not a photometric rig, so it only supports
+on/off, not directional sequencing.
 
 Pi 5 note: RPi.GPIO/pigpio don't work here (GPIO sits behind the RP1 chip) -
 gpiozero with the lgpio backend does.

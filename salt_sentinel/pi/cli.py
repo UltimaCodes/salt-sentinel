@@ -38,8 +38,9 @@ def cmd_geometry(a):
         print(f"{d:>7.0f}mm{frame_width_mm(d):>9.0f}mm{mm_per_pixel(d):>9.1f}   {ok}")
 
     from saltsentinel.photometric import incidence_deg
-    print("\nLED RING (photometric stereo, not the current single fill "
-          "ring - see leds.py): incidence angle, 25-35 deg useful band\n")
+    print("\nLED RING (not fitted yet - config.LED_FITTED is False. Dimensioning "
+          "math for whenever it is, photometric stereo): incidence angle, "
+          "25-35 deg useful band\n")
     for r in (60, 90, 120, 150):
         ang = incidence_deg(cfg.STANDOFF_NEAR_MM, r)
         print(f"  radius {r:>3d} mm at {cfg.STANDOFF_NEAR_MM:.0f} mm -> {ang:>4.1f} deg  "
@@ -154,13 +155,17 @@ def cmd_teleop(a):
 def cmd_calib_camera(a):
     from saltsentinel.camera import Camera
     cam = Camera(simulate=a.sim)
-    print("Metering once under the LEDs you will actually use...")
+    print("Metering once under the lighting you will actually shoot under...")
     lock = cam.autotune_once(cfg.STANDOFF_NEAR_MM)
     print(f"  exposure    {lock.exposure_us} us")
     print(f"  gain        {lock.analogue_gain:.2f}")
     print(f"  colour      {lock.colour_gains}")
-    print(f"  lens        {lock.lens_position:.2f} dioptres "
-          f"(~{1000/lock.lens_position:.0f} mm)")
+    if lock.lens_position is not None:
+        print(f"  lens        {lock.lens_position:.2f} dioptres "
+              f"(~{1000/lock.lens_position:.0f} mm)")
+    else:
+        print("  lens        fixed-focus sensor - no software lens control, "
+              "focus is whatever the ring is physically set to")
     print("\nFrozen and saved. Do NOT re-run between visits - that breaks comparability.")
     cam.close()
     return 0
@@ -264,7 +269,9 @@ def cmd_patrol(a):
     hub = SensorHub(simulate=a.sim)
     tc = ThermalCamera(simulate=a.sim)
     cam = None if a.no_camera else Camera(simulate=a.sim)
-    ring = None if a.no_camera else LedRing(simulate=a.sim)
+    # LED_FITTED: no ring is wired yet - without this gate a real (non-sim)
+    # run would still try to drive GPIO17 as if a ring were connected there.
+    ring = LedRing(simulate=a.sim) if (cfg.LED_FITTED and not a.no_camera) else None
     with Drive(simulate=a.sim) as d:
         p = Patrol(d, hub, tc, cam, ring)
         if cam and ring:
@@ -274,8 +281,20 @@ def cmd_patrol(a):
 
 
 def main():
+    # --sim needs to parse whether it comes before or after the subcommand
+    # ("cli.py --sim selftest" or "cli.py selftest --sim"), so every parser
+    # gets its own --sim with default=SUPPRESS: if a subparser doesn't see
+    # --sim on its own tokens it must leave `sim` alone rather than reset
+    # it, or "--sim selftest" would parse sim=True at the top level and then
+    # have the selftest subparser immediately clobber it back to False.
+    # (Sharing one parent parser object via parents=[...] across multiple
+    # add_parser() calls silently breaks this SUPPRESS default - each
+    # parser needs its own --sim action, not a shared one.) The actual
+    # default (False) is set once, explicitly, on the top-level parser.
     ap = argparse.ArgumentParser(description="Salt Sentinel")
-    ap.add_argument("--sim", action="store_true", help="run without hardware")
+    ap.add_argument("--sim", action="store_true", default=argparse.SUPPRESS,
+                     help="run without hardware")
+    ap.set_defaults(sim=False)
     sub = ap.add_subparsers(dest="cmd", required=True)
     for name, fn in (("selftest", cmd_selftest), ("teleop", cmd_teleop),
                      ("calib-camera", cmd_calib_camera),
@@ -283,6 +302,8 @@ def main():
                      ("station", cmd_station), ("geometry", cmd_geometry),
                      ("patrol", cmd_patrol), ("demo", cmd_demo)):
         s = sub.add_parser(name)
+        s.add_argument("--sim", action="store_true", default=argparse.SUPPRESS,
+                        help="run without hardware")
         s.set_defaults(func=fn)
         if name == "patrol":
             s.add_argument("--stations", type=int, default=20)

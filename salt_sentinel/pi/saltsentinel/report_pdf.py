@@ -9,7 +9,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
 from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle, Paragraph,
                                 Spacer, Image as RLImage)
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.styles import getSampleStyleSheet
 
 from .thermal import frame_width_mm
 
@@ -27,12 +27,10 @@ def _station_xyr(r: dict) -> tuple[float, float, float]:
 
 
 def build(records: list[dict], heatmap_path: str, out_path: str,
-         site_name: str = "Validation wall", preview: bool = False) -> str:
+         site_name: str = "Validation wall") -> str:
     styles = getSampleStyleSheet()
     title_style = styles["Title"]
     body = styles["BodyText"]
-    footer_style = ParagraphStyle("footer", parent=body, textColor=colors.grey,
-                                  fontName="Helvetica", fontSize=7)
 
     doc = SimpleDocTemplate(out_path, pagesize=A4,
                             topMargin=18 * mm, bottomMargin=16 * mm,
@@ -93,13 +91,6 @@ def build(records: list[dict], heatmap_path: str, out_path: str,
         "Risk weights are provisional, pending calibration against the "
         "validation wall's known dosed/clean patches (report section 3.6).",
         body))
-
-    if preview:
-        story.append(Spacer(1, 10 * mm))
-        story.append(Paragraph(
-            "Preview report, generated ahead of the working prototype "
-            "(target: 1 Sep 2026) - see report section 4.6 for the "
-            "validation timeline.", footer_style))
 
     doc.build(story)
     return out_path
