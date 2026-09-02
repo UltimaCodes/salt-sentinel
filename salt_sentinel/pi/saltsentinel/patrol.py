@@ -229,7 +229,20 @@ class Patrol:
                     self.state = State.STATION_FAR
                     far = self._capture_far(climate)
 
-                    flagged = far.thermal.get("peak_cooling_c", 0.0) >= self.flag_threshold_c
+                    # Require a genuine spatial gradient (damp_row set - see
+                    # thermal.analyse(): the row with the single largest
+                    # top-to-bottom step), not just one pixel over threshold.
+                    # A real rising-damp line reads as a structured
+                    # dry-then-suddenly-cooler transition; a rock, hand or
+                    # sheet of plastic held in front of the sensor is close
+                    # to isothermal across the whole frame and won't produce
+                    # one, so peak_cooling_c alone is not enough to flag on -
+                    # standard practice in building IRT is exactly this:
+                    # gradient/anomaly shape, not a single reading, is what
+                    # separates a real defect from sensor noise or clutter.
+                    peak_hit = far.thermal.get("peak_cooling_c", 0.0) >= self.flag_threshold_c
+                    gradient_hit = far.thermal.get("damp_row", -1) > 0
+                    flagged = peak_hit and gradient_hit
                     self._any_flagged = self._any_flagged or flagged
                     if flagged and self.camera and self.leds:
                         self.state = State.STATION_NEAR
@@ -237,6 +250,9 @@ class Patrol:
                         self._capture_near(climate)
                     elif flagged:
                         self._say("flagged, but no camera/LED ring fitted - skipping near pass")
+                    elif peak_hit:
+                        self._say("cooling seen but no coherent gradient - not flagging "
+                                  "(likely not a wall surface)")
                     else:
                         self._say("no cooling above threshold, skipping near pass")
 

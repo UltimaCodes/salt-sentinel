@@ -87,6 +87,14 @@ LED_ANGLES_DEG = (0.0, 90.0, 180.0, 270.0)
 # Physical offset between the AMG8833 centre and the camera lens centre. This
 # is what makes the overlay distance-dependent: the offset is fixed in mm but
 # scales in pixels, so an assumed range puts the two frames on different bricks.
+# Arm layout, top-down: camera centred, thermal array to its left; the whole
+# arm and both chassis ToF sensors face the robot's right (the wall side) -
+# matches the wall_b=front/wall_a=back derivation in TOF_XSHUT above, which
+# was worked out independently from the steering code's sign convention.
+# Only magnitude is used anywhere right now (geometry.overlay_geometry() and
+# the diagnostic table in `cli.py geometry`) - the pixel-registration
+# functions that would need the left/right direction (thermal_pixel_to_camera,
+# thermal_to_camera_map, overlay()) aren't called from the real pipeline yet.
 THERMAL_CAM_BASELINE_MM = 40.0
 CAM_FOV_DEG = 53.5          # OV5647 horizontal; measure yours and correct this
 CAM_PX_WIDTH = 2028

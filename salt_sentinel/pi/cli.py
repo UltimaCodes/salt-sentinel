@@ -242,7 +242,14 @@ def cmd_station(a):
     )
     score = risk_mod.score_session([risk_mod.RiskInputs(moisture_index=r.moisture_index)])[0]
     rec.risk_score = score
-    rec.flagged = score >= risk_mod.FLAG_THRESHOLD
+    # Same gradient requirement as patrol.py: a genuine damp line reads as a
+    # structured dry-then-cooler transition (damp_row set), not just one
+    # pixel over threshold - a rock/plastic/hand held in front of the
+    # sensor won't produce that shape even if it happens to read cool.
+    rec.flagged = (score >= risk_mod.FLAG_THRESHOLD) and (r.damp_row > 0)
+    if score >= risk_mod.FLAG_THRESHOLD and r.damp_row <= 0:
+        print("  note: cooling seen but no coherent gradient - not flagging "
+              "(likely not a wall surface)")
     store.append(rec)
     records = store.load()
 
