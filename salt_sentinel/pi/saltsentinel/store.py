@@ -81,6 +81,15 @@ class Store:
             f.write(json.dumps(asdict(rec), default=list) + "\n")
         return rec
 
+    def rewrite(self, records: list[dict]):
+        """Overwrite stations.jsonl with these records (already-loaded dicts,
+        presumably mutated) - used once per run, after score_session() needs
+        every station in the session to normalise moisture against, to
+        write the resulting risk_score/flagged back in."""
+        with self.jsonl.open("w", encoding="utf-8") as f:
+            for r in records:
+                f.write(json.dumps(r, default=list) + "\n")
+
     def images_dir(self, station: int) -> Path:
         d = self.dir / f"station_{station:03d}"
         d.mkdir(parents=True, exist_ok=True)

@@ -171,17 +171,31 @@ def cmd_calib_camera(a):
     return 0
 
 
+def _prompt_temp_c(label: str, default: float) -> float:
+    """A stray non-numeric character here used to raise ValueError straight
+    out of cmd_calib_thermal and abort the whole calibration after the
+    (slow, 40-frame) capture had already happened. Retry in place instead."""
+    while True:
+        raw = input(f"  {label}: ").strip()
+        if not raw:
+            return default
+        try:
+            return float(raw)
+        except ValueError:
+            print(f"  not a number: {raw!r} - try again (or just Enter for {default})")
+
+
 def cmd_calib_thermal(a):
     import numpy as np
     tc = ThermalCamera(simulate=a.sim)
     print("Point the sensor at a UNIFORM flat surface at ambient.")
     input("  press enter when steady... ")
     cool = np.stack([tc._raw() for _ in range(40)])
-    cool_ref = float(input("  true surface temperature in C: ") or 25.0)
+    cool_ref = _prompt_temp_c("true surface temperature in C", 25.0)
     print("Now warm the same surface a few degrees (hand-warm is enough).")
     input("  press enter when steady... ")
     warm = np.stack([tc._raw() for _ in range(40)])
-    warm_ref = float(input("  true surface temperature in C: ") or 32.0)
+    warm_ref = _prompt_temp_c("true surface temperature in C", 32.0)
     g, o = tc.calibrate_flat_field(cool, warm, cool_ref, warm_ref)
     print(f"  gain   {g.min():.3f} .. {g.max():.3f}")
     print(f"  offset {o.min():+.3f} .. {o.max():+.3f} C")
@@ -192,8 +206,12 @@ def cmd_calib_thermal(a):
 
 def cmd_station(a):
     from saltsentinel import geometry as geo
+    from saltsentinel import risk as risk_mod
+    from saltsentinel import wallmap, report_pdf
+    from saltsentinel.camera import Camera
     hub = SensorHub(simulate=a.sim)
     tc = ThermalCamera(simulate=a.sim)
+    cam = None if a.no_camera else Camera(simulate=a.sim)
     store = Store()
     c = hub.climate()
     pose = hub.wall_pose()
@@ -208,75 +226,52 @@ def cmd_station(a):
     for w in warnings:
         print(f"  ! {w}")
 
-    # This used to just print numbers and report store.dir as if the
-    # reading had been saved there - it never actually was. Build and
-    # append the record for real, then finalize (rename + USB mirror)
-    # the same as patrol/demo do, since a standalone station capture has
-    # no other "run complete" signal to trigger that on.
+    photo_path = None
+    if cam:
+        import cv2
+        photo_path = str(store.images_dir(1) / "wall.jpg")
+        cv2.imwrite(photo_path, cv2.cvtColor(cam.grab_rgb(), cv2.COLOR_RGB2BGR))
+        cam.close()
+
     rec = StationRecord(
         station=1, pass_mode="far",
-        standoff_mm=d, wall_yaw_deg=pose.yaw_deg,
+        standoff_mm=d, wall_yaw_deg=pose.yaw_deg, odo_mm=0.0,
         air_temp_c=c.temp_c, rh_pct=c.rh_pct, dew_margin_c=c.dew_margin_c,
         deliquescence_open=c.deliquescence_open,
         thermal=r.as_dict(), geometry_warnings=warnings,
     )
+    score = risk_mod.score_session([risk_mod.RiskInputs(moisture_index=r.moisture_index)])[0]
+    rec.risk_score = score
+    rec.flagged = score >= risk_mod.FLAG_THRESHOLD
     store.append(rec)
-    flagged = r.peak_cooling_c >= 0.6   # matches Patrol's default flag_threshold_c
-    final_dir = store.finalize(flagged)
-    print(f"saved to {final_dir} ({'OUTPUTSALT' if flagged else 'OUTPUTCLEAN'}, "
-          f"+ USB copy if a drive was plugged in)")
-    return 0
-
-
-def _placeholder_wall_photo(path):
-    """Procedural stand-in brick wall, used until a real photo is supplied."""
-    import numpy as np
-    import cv2
-    h, w = 900, 2028
-    img = np.full((h, w, 3), (58, 74, 96), dtype=np.uint8)   # BGR brick-ish red
-    for row in range(0, h, 60):
-        offset = 90 if (row // 60) % 2 else 0
-        cv2.line(img, (0, row), (w, row), (40, 40, 40), 3)
-        for col in range(-90, w, 180):
-            cv2.line(img, (col + offset, row), (col + offset, row + 60), (40, 40, 40), 3)
-    noise = np.random.default_rng(1).normal(0, 6, img.shape).astype(np.int16)
-    img = np.clip(img.astype(np.int16) + noise, 0, 255).astype(np.uint8)
-    cv2.imwrite(str(path), img)
-    return str(path)
-
-
-def cmd_demo(a):
-    """Generate the CSV, wall heatmap and PDF report from the staged demo
-    scenario. Pass --photos once real wall photos are available."""
-    from saltsentinel import demo_scenario, wallmap, report_pdf
-
-    store = demo_scenario.build_run()
     records = store.load()
-    print(f"wrote {len(records)} simulated station records to {store.dir}")
-
-    photos = a.photos
-    if not photos:
-        ph_path = store.dir / "placeholder_wall.jpg"
-        photos = [str(_placeholder_wall_photo(ph_path))]
-        print(f"no --photos given: using a procedural placeholder at {ph_path}")
-        print("re-run with --photos <your wall photo(s)> once you have them")
-
-    heat_path = store.dir / "wall_heatmap.png"
-    res = wallmap.render(
-        photos,
-        station_odo_mm=[r["odo_mm"] for r in records],
-        station_cooling_c=[-r["thermal"]["moisture_index"] for r in records],
-        station_damp_height_mm=[r["thermal"]["damp_height_mm"] for r in records],
-        out_path=str(heat_path),
-    )
-    print(f"heatmap ({'stitched from ' + str(res.stitched_from) + ' photos' if res.stitched_from > 1 else 'single photo'}): {heat_path}")
 
     csv_path = store.export_csv()
     print(f"csv: {csv_path}")
 
+    heatmap_path = ""
+    if photo_path:
+        try:
+            res = wallmap.render(
+                [photo_path], station_odo_mm=[0.0],
+                station_cooling_c=[r.moisture_index],
+                station_damp_height_mm=[r.damp_height_mm],
+                out_path=str(store.dir / "wall_heatmap.png"),
+            )
+            heatmap_path = res.out_path
+            print(f"heatmap: {heatmap_path}")
+        except Exception as e:
+            print(f"heatmap generation failed: {e!r}")
+    else:
+        print("no camera (--no-camera or none fitted) - skipping heatmap")
+
     pdf_path = store.dir / "condition_report.pdf"
-    report_pdf.build(records, str(heat_path), str(pdf_path))
+    report_pdf.build(records, heatmap_path, str(pdf_path))
     print(f"pdf: {pdf_path}")
+
+    final_dir = store.finalize(rec.flagged)
+    print(f"saved to {final_dir} ({'OUTPUTSALT' if rec.flagged else 'OUTPUTCLEAN'}, "
+          f"+ USB copy if a drive was plugged in)")
     return 0
 
 
@@ -318,7 +313,7 @@ def main():
                      ("calib-camera", cmd_calib_camera),
                      ("calib-thermal", cmd_calib_thermal),
                      ("station", cmd_station), ("geometry", cmd_geometry),
-                     ("patrol", cmd_patrol), ("demo", cmd_demo)):
+                     ("patrol", cmd_patrol)):
         s = sub.add_parser(name)
         s.add_argument("--sim", action="store_true", default=argparse.SUPPRESS,
                         help="run without hardware")
@@ -326,10 +321,8 @@ def main():
         if name == "patrol":
             s.add_argument("--stations", type=int, default=20)
             s.add_argument("--no-camera", action="store_true")
-        if name == "demo":
-            s.add_argument("--photos", nargs="*", default=[],
-                           help="one or more overlapping wall photos - 2+ get "
-                                "real cv2 panorama stitching, 1 is used as-is")
+        if name == "station":
+            s.add_argument("--no-camera", action="store_true")
     a = ap.parse_args()
     return a.func(a)
 

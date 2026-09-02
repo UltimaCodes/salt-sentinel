@@ -62,7 +62,7 @@ def build(records: list[dict], heatmap_path: str, out_path: str,
             f"{x_m:.2f}",
             f"{y_m:.2f}",
             f"{radius_mm:.0f}",
-            f"{-th.get('moisture_index', 0.0):.2f}",
+            f"{th.get('moisture_index', 0.0):.2f}",
             f"{r.get('risk_score', 0.0):.2f}",
             "FLAGGED" if r.get("flagged") else "",
         ])

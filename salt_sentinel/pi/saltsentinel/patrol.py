@@ -11,14 +11,20 @@ Two passes per station, opposite standoffs: FAR (~1m) for the thermal
 survey (frame needs both damp and dry brick in view), NEAR (~25cm) for
 camera detail, only where the far pass actually flagged something.
 
-On completion, the run is saved under a OUTPUTCLEAN/OUTPUTSALT-suffixed
-folder (Store.finalize()) and mirrored to any USB drive that's plugged in.
+On completion, every captured station is re-scored as one session (risk.py,
+normalised against this run's own median so a site-wide wet day doesn't
+read as universal deterioration), and the same CSV + wall heatmap + PDF
+condition report the old synthetic demo pipeline used to produce now get
+built from the real data - see _finish(). The run is then saved under a
+OUTPUTCLEAN/OUTPUTSALT-suffixed folder (Store.finalize()) and mirrored to
+any USB drive that's plugged in.
 """
 
 from __future__ import annotations
 
 import time
 from enum import Enum, auto
+from pathlib import Path
 
 from . import config as cfg
 from .store import StationRecord, Store
@@ -54,6 +60,7 @@ class Patrol:
         self._enc0 = None
         self.log: list[str] = []
         self._any_flagged = False        # -> OUTPUTSALT vs OUTPUTCLEAN at finalize()
+        self._photo_paths: list[str] = []  # real wall photos, one per far pass - feeds wallmap
 
     # ------------------------------------------------------------- utilities
     def _say(self, msg: str):
@@ -109,6 +116,19 @@ class Patrol:
         self._say(f"station {self.station} far: cooling={res.moisture_index:+.2f}C "
                   f"peak={res.peak_cooling_c:+.2f}C damp_row={res.damp_row} "
                   f"noise={res.noise_floor_c:.3f}C")
+
+        # One real wall photo per station, ambient light (no LED ring fitted
+        # yet - see config.LED_FITTED). These feed the end-of-run heatmap
+        # panorama in _finish(), in odometry order.
+        if self.camera:
+            try:
+                import cv2
+                photo_path = str(self.store.images_dir(self.station) / "wall.jpg")
+                cv2.imwrite(photo_path, cv2.cvtColor(self.camera.grab_rgb(), cv2.COLOR_RGB2BGR))
+                self._photo_paths.append(photo_path)
+            except Exception as e:
+                self._say(f"photo capture failed: {e!r}")
+
         return rec
 
     def _capture_near(self, climate) -> StationRecord | None:
@@ -211,10 +231,12 @@ class Patrol:
 
                     flagged = far.thermal.get("peak_cooling_c", 0.0) >= self.flag_threshold_c
                     self._any_flagged = self._any_flagged or flagged
-                    if flagged:
+                    if flagged and self.camera and self.leds:
                         self.state = State.STATION_NEAR
                         self._say("flagged - running near pass")
                         self._capture_near(climate)
+                    elif flagged:
+                        self._say("flagged, but no camera/LED ring fitted - skipping near pass")
                     else:
                         self._say("no cooling above threshold, skipping near pass")
 
@@ -236,7 +258,60 @@ class Patrol:
             self.drive.enable(False)
 
         self._say(f"finished in state {self.state.name} after {self.station} stations")
+        self._finish()
+        return self.state
+
+    def _finish(self) -> Path:
+        """Score the session, write the CSV/heatmap/PDF report, then
+        finalize (rename + USB mirror) last so the mirror picks up
+        everything - jsonl, csv, heatmap, pdf - in one pass."""
+        from . import risk as risk_mod
+        from . import wallmap, report_pdf
+
+        records = self.store.load()
+        if records:
+            inputs = [risk_mod.RiskInputs(
+                moisture_index=(r.get("thermal") or {}).get("moisture_index", 0.0) or 0.0,
+                efflorescence_growth=(r.get("surface") or {}).get("bright_fraction", 0.0) or 0.0,
+                flaking_trend=((r.get("surface") or {}).get("roughness", 0.0) or 0.0) / 10.0,
+            ) for r in records]
+            for rec, score in zip(records, risk_mod.score_session(inputs)):
+                rec["risk_score"] = score
+                rec["flagged"] = score >= risk_mod.FLAG_THRESHOLD
+            self.store.rewrite(records)
+
+        csv_path = self.store.export_csv()
+        self._say(f"csv: {csv_path}")
+
+        heatmap_path = ""
+        if self._photo_paths and records:
+            try:
+                res = wallmap.render(
+                    self._photo_paths,
+                    station_odo_mm=[r.get("odo_mm") or 0.0 for r in records],
+                    station_cooling_c=[(r.get("thermal") or {}).get("moisture_index", 0.0) or 0.0
+                                       for r in records],
+                    station_damp_height_mm=[(r.get("thermal") or {}).get("damp_height_mm", 0.0) or 0.0
+                                            for r in records],
+                    out_path=str(self.store.dir / "wall_heatmap.png"),
+                )
+                heatmap_path = res.out_path
+                self._say(f"heatmap ({res.stitched_from} photo"
+                          f"{'s' if res.stitched_from != 1 else ''}): {heatmap_path}")
+            except Exception as e:
+                self._say(f"heatmap generation failed: {e!r}")
+        else:
+            self._say("no photos captured (camera not fitted or --no-camera) - skipping heatmap")
+
+        if records:
+            pdf_path = self.store.dir / "condition_report.pdf"
+            try:
+                report_pdf.build(records, heatmap_path, str(pdf_path))
+                self._say(f"pdf: {pdf_path}")
+            except Exception as e:
+                self._say(f"pdf generation failed: {e!r}")
+
         final_dir = self.store.finalize(self._any_flagged)
         self._say(f"saved to {final_dir} ({'OUTPUTSALT' if self._any_flagged else 'OUTPUTCLEAN'}, "
                   f"+ USB copy if a drive was plugged in)")
-        return self.state
+        return final_dir

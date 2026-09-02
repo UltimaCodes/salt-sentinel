@@ -16,7 +16,7 @@ FLAG_THRESHOLD = 0.5
 
 @dataclass
 class RiskInputs:
-    moisture_index: float               # deg C cooling, negative = wetter
+    moisture_index: float               # deg C cooling below dry reference; positive = wetter (thermal.py's native convention)
     efflorescence_growth: float = 0.0
     flaking_trend: float = 0.0
 
@@ -30,7 +30,7 @@ def score_session(readings: list[RiskInputs]) -> list[float]:
 
     out = []
     for r in readings:
-        moist_z = (med - r.moisture_index) / spread   # cooler-than-median -> positive
+        moist_z = (r.moisture_index - med) / spread   # wetter-than-median -> positive
         s = (WEIGHTS["moisture"] * moist_z
              + WEIGHTS["efflorescence"] * r.efflorescence_growth
              + WEIGHTS["flaking"] * r.flaking_trend)
