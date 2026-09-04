@@ -177,7 +177,7 @@ static void handleBt(char c) {
 // ----------------------------------------------------------------- setup
 void setup() {
   Serial.begin(115200);
-  SerialBT.setPin(BT_PIN);   // must be called before begin()
+  SerialBT.setPin(BT_PIN, strlen(BT_PIN));   // must be called before begin()
   SerialBT.begin("thepretender");
 
   pwmInit(PIN_L_RPWM, PWM_FREQ, PWM_BITS);
