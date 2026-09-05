@@ -25,6 +25,7 @@ any USB drive that's plugged in.
 from __future__ import annotations
 
 import select
+import signal
 import sys
 import time
 from enum import Enum, auto
@@ -296,7 +297,12 @@ class Patrol:
                 termios.tcsetattr(term_fd, termios.TCSADRAIN, old_term)
 
         self._say(f"finished in state {self.state.name} after {self.station} stations")
-        self._finish()
+        self._say("saving - a second Ctrl+C here is ignored until this finishes")
+        old_sigint = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        try:
+            self._finish()
+        finally:
+            signal.signal(signal.SIGINT, old_sigint)
         return self.state
 
     def _finish(self) -> Path:
