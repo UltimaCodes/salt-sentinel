@@ -125,7 +125,7 @@ MAX_DIFF = 340
 # ------------------------------------------------------------------ patrol
 WALL_LOST_MM = 1400     # wall sensors beyond this: the wall has ended
 FRONT_STOP_MM = 300     # front sensor closer than this: corner reached
-STATION_SPACING_MM = 400
+STATION_SPACING_MM = 100
 
 
 @dataclass

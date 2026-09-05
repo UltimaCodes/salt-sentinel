@@ -10,6 +10,8 @@ saves whatever was captured so far, same as a normal end-of-wall.
 Two passes per station, opposite standoffs: FAR (~1m) for the thermal
 survey (frame needs both damp and dry brick in view), NEAR (~25cm) for
 camera detail, only where the far pass actually flagged something.
+Stations trigger automatically every STATION_SPACING_MM, or immediately
+on demand - pressing space during FOLLOW forces one right away.
 
 On completion, every captured station is re-scored as one session (risk.py,
 normalised against this run's own median so a site-wide wet day doesn't
@@ -22,6 +24,8 @@ any USB drive that's plugged in.
 
 from __future__ import annotations
 
+import select
+import sys
 import time
 from enum import Enum, auto
 from pathlib import Path
@@ -190,12 +194,26 @@ class Patrol:
         self.drive.enable(True)
         t0 = time.time()
 
+        term_fd, old_term = None, None
+        try:
+            import termios, tty
+            term_fd = sys.stdin.fileno()
+            old_term = termios.tcgetattr(term_fd)
+            tty.setcbreak(term_fd)
+            self._say("spacebar forces an immediate station capture")
+        except Exception:
+            self._say("no POSIX terminal - manual station key (space) unavailable")
+
         try:
             while self.state not in (State.WALL_END, State.FAULT):
                 if time.time() - t0 > timeout_s:
                     self._say("timeout")
                     self.state = State.FAULT
                     break
+
+                manual = (term_fd is not None
+                          and select.select([sys.stdin], [], [], 0)[0]
+                          and sys.stdin.read(1) == " ")
 
                 pose = self.hub.wall_pose(speed_mms=self._speed_mms)
                 front = self.hub.read_front()
@@ -218,13 +236,15 @@ class Patrol:
                     self._say(f"corner at {front:.0f} mm")
                     break
 
-                # reached the next station
-                if self.odo_mm - self._last_station_odo >= cfg.STATION_SPACING_MM:
+                # reached the next station, on distance or the spacebar
+                if manual or self.odo_mm - self._last_station_odo >= cfg.STATION_SPACING_MM:
                     self.drive.stop()
                     self._speed_mms = 0.0
                     time.sleep(0.4)
                     self.station += 1
                     self._last_station_odo = self.odo_mm
+                    if manual:
+                        self._say("manual station trigger (spacebar)")
 
                     self.state = State.STATION_FAR
                     far = self._capture_far(climate)
@@ -272,6 +292,8 @@ class Patrol:
         finally:
             self.drive.stop()
             self.drive.enable(False)
+            if term_fd is not None:
+                termios.tcsetattr(term_fd, termios.TCSADRAIN, old_term)
 
         self._say(f"finished in state {self.state.name} after {self.station} stations")
         self._finish()
